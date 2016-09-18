@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE attributes PUBLIC "-//NetBeans//DTD DefaultAttributes 1.0//EN" "http://www.netbeans.org/dtds/attributes-1_0.dtd">
+<attributes version="1.0">
+    <fileobject name="SimpleFMRTInst.java">
+        <attr name="class_dependency_jm.audio.Instrument" stringvalue="SimpleFMRTInst"/>
+    </fileobject>
+    <fileobject name="PrintSineInst.java">
+        <attr name="class_dependency_jm.audio.Instrument" stringvalue="PrintSineInst"/>
+    </fileobject>
+    <fileobject name="SimpleFMInst.java">
+        <attr name="class_dependency_jm.audio.Instrument" stringvalue="SimpleFMInst"/>
+    </fileobject>
+    <fileobject name="PluckInst.java">
+        <attr name="class_dependency_jm.audio.Instrument" stringvalue="PluckInst"/>
+    </fileobject>
+    <fileobject name="SimplestInst.java">
+        <attr name="class_dependency_jm.audio.Instrument" stringvalue="SimplestInst"/>
+    </fileobject>
+</attributes>
