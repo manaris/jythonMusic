@@ -109,9 +109,13 @@ class TimerListener(ActionListener):
       """
       Call the eventFunction.
       """
-      # call the function with the specified parameters 
-      # (see http://docs.python.org/2/tutorial/controlflow.html#unpacking-argument-lists)
-      self.eventFunction(*self.parameters)  
+      try:  
+         # call the function with the specified parameters 
+         # (see http://docs.python.org/2/tutorial/controlflow.html#unpacking-argument-lists)
+         self.eventFunction(*self.parameters)  
+      except Exception, e:
+         # print error to console (since, otherwise, error is hidden, due to this happening inside Java)
+         print repr(e)
 
 
 ###############################################################################
