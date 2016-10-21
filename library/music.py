@@ -1,11 +1,11 @@
 ################################################################################################################
-# music.py      Version 4.3         28-Aug-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.4         21-Oct-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
 # This file is part of Jython Music.
 #
-# Copyright (C) 2011-2016 Bill Manaris, Chris Benson, and Kenneth Hanson
+# Copyright (C) 2011-2016 Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 #
 #    Jython Music is free software: you can redistribute it and/or modify
 #    it under the terms of the GNU General Public License as published by
@@ -28,7 +28,9 @@
 #
 # REVISIONS:
 #
-# 4.3   28-Aug-2016 (bm)  Added Play.audio(), Play.audioNote(), Play.audioOn(), Play.audioOff(), Play.allAudioNotesOff() to 
+# 4.4   21-Oct-2016 (bm, mm)  Fixed clicking in Play.audio() by adding a timer to lower volume right before the ending of an audio note.
+#
+# 4.3   28-Aug-2016 (bm, mm)  Added Play.audio(), Play.audioNote(), Play.audioOn(), Play.audioOff(), Play.allAudioNotesOff() to 
 #                   play musical material via AudioSamples.  These functions parallel the corresponding Play.note(), etc. functions.
 #                   The only difference is that audio samples are provided to be used in place of MIDI channels to render the music.
 #                   Also fixed bug with rendering panning information in notes in Play.midi() and Play.audio().  
@@ -37,7 +39,7 @@
 #
 # 4.2   12-Aug-2016 (bm)  Using Timer2() class (based on java.util.Timer) for Play.note(), etc.  More reliable.
 #
-# 4.1   28-Jul-2016 (bm and mm)  Resolved following issues with Play.midi():
+# 4.1   28-Jul-2016 (bm, mm)  Resolved following issues with Play.midi():
 #                   (a) Playback now uses length of a note (vs. its duration) to determine how long it sounds (as it should).
 #                   (b) Chord durations were calculated improperly for some chord notes, due to a note sorting error.  This has been fixed by
 #                   sorting noteList in Play.midi() by start time, then duration, then pitch then etc.
@@ -46,7 +48,7 @@
 #                   removed from the list by frequencyOff(), respectively. (Race condition is still present, but due to rewritten logic, it
 #                   does not cause any trouble anymore.  All concurrent notes are turned off when they should.)
 #
-# 4.0   14-May-2016 (bm and mm)  Added microtonal capabilities.  Now, we can create and play notes using frequencies (float, in Hz), 
+# 4.0   14-May-2016 (bm, mm)  Added microtonal capabilities.  Now, we can create and play notes using frequencies (float, in Hz), 
 #                   instead of pitch (0-127).  Updated new Play.midi() function to handle microtones / frequencies (by using pitchbend).  
 #                   Only one frequency per channel can be played accurately (since there is only one pitchbend per channel).  Regular notes
 #                   can play concurrently as usual (i.e., for chords).  However, for concurrent microtones on a given channel, 
@@ -1760,9 +1762,13 @@ class Play(jPlay):
       # create a timer for the note-off event
       audioOff = Timer2(start+duration, Play.audioOff, [pitch, audioSample], False)
 
+      # lower volume right at end of the audioOff event (this removes clicking)
+      envelopeTimer = Timer2(start+duration, audioSample.setVolume, [0], False)
 
       audioOn.start()
       audioOff.start()
+      envelopeTimer.start()
+
 
    def audioOn(pitch, audioSample, velocity = 127, panning = -1):
       """Start playing a specific pitch at a given volume using provided audio sample."""
