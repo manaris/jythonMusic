@@ -1,5 +1,5 @@
 ################################################################################################################
-# music.py      Version 4.4         21-Oct-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.5         05-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,8 @@
 #
 #
 # REVISIONS:
+#
+# 4.5   05-Nov-2016 (bm)  Fixed small but important bug in Play.midi (a missing variable in the part scheduling all notes in the chord list).
 #
 # 4.4   21-Oct-2016 (bm, mm)  Fixed clicking in Play.audio() by adding a timer to lower volume right before the ending of an audio note.
 #
@@ -1392,7 +1394,7 @@ class Play(jPlay):
                chordNotes.append([start, duration, pitch, velocity, channel, panning])
                
                # now, schedule all notes in the chord list using last note's duration
-               for start, ignoreThisDuration, pitch, velocity, channel in chordNotes:
+               for start, ignoreThisDuration, pitch, velocity, channel, panning in chordNotes:
                   # schedule this note using chord's duration (provided by the last note in the chord)
                   Play.note(pitch, start, duration, velocity, channel, panning)
                   #print "Chord: Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
