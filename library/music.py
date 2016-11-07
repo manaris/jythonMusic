@@ -1,5 +1,5 @@
 ################################################################################################################
-# music.py      Version 4.5         05-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.6         07-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,9 @@
 #
 #
 # REVISIONS:
+#
+# 4.6   07-Nov-2016 (bm)  Fixed inefficiency problem in Play.midi (took forever to play long scores, e.g., > 3000 notes).  Now, things work
+#                   in real time again.
 #
 # 4.5   05-Nov-2016 (bm)  Fixed small but important bug in Play.midi (a missing variable in the part scheduling all notes in the chord list).
 #
@@ -216,6 +219,7 @@ from jm.constants.Scales import *
 from jm.constants.Tunings import *
 from jm.constants.Volumes import *
 from jm.constants.Waveforms import *
+
 
 ######################################################################################
 # Jython 2.5.3 fix for input()
@@ -1141,7 +1145,7 @@ from javax.sound.midi import *
 
 # NOTE: Opening the Java synthesizer below generates some low-level noise in the audio output.
 # But we need it to be open, in clase the end-user wishes to use functions like Play.noteOn(), below. 
-# (*** Is there a way to open it just-in-time, and/or close it when not used? I cannot think of one.)
+# (  Is there a way to open it just-in-time, and/or close it when not used? I cannot think of one.)
  
 Java_synthesizer = MidiSystem.getSynthesizer()  # get a Java synthesizer
 Java_synthesizer.open()                         # and activate it (should we worry about close()???)
@@ -1330,7 +1334,8 @@ class Play(jPlay):
 
          score = material   # by now, material is a score, so create an alias (for readability)
 
-        # loop through all parts and phrases to get all notes
+
+         # loop through all parts and phrases to get all notes
          noteList = []               # holds all notes
          tempo = score.getTempo()    # get global tempo (can be overidden by part and phrase tempos)
          for part in score.getPartArray():   # traverse all parts
@@ -1348,17 +1353,19 @@ class Play(jPlay):
                # (this needs to happen here every time, as we may be using the tempo from score, part, or phrase)
                FACTOR = 1000 * 60.0 / tempo   
 
-               for index in range(phrase.length()):      # traverse all notes in this phrase
-                  note = phrase.getNote(index)              # and extract needed note data
+               # process notes in this phrase
+               startTime = phrase.getStartTime() * FACTOR   # in milliseconds
+               for note in phrase.getNoteArray():
                   frequency = note.getFrequency()
                   panning = note.getPan()
                   panning = mapValue(panning, 0.0, 1.0, 0, 127)    # map from range 0.0..1.0 (Note panning) to range 0..127 (as expected by Java synthesizer)
-                  start = int(phrase.getNoteStartTime(index) * FACTOR)  # get time and convert to milliseconds
+                  start = int(startTime)                           # remember this note's start time (in milliseconds)
 
                   # NOTE:  Below we use note length as opposed to duration (getLength() vs. getDuration())
                   # since note length gives us a more natural sounding note (with proper decay), whereas 
                   # note duration captures the more formal (printed score) duration (which sounds unnatural).
                   duration = int(note.getLength() * FACTOR)             # get note length (as oppposed to duration!) and convert to milliseconds
+                  startTime = startTime + note.getDuration() * FACTOR   # update start time (in milliseconds)
                   velocity = note.getDynamic()
                    
                   # accumulate non-REST notes
@@ -1368,7 +1375,6 @@ class Play(jPlay):
                    
          # sort notes by start time
          noteList.sort()
-       
 
          # Schedule playing all notes in noteList
          chordNotes = []      # used to process notes belonging in a chord
@@ -1402,7 +1408,7 @@ class Play(jPlay):
 
                # so, clear chord notes to continue handling new notes (if any)
                chordNotes = []
-
+   
          # now, all notes have been scheduled for future playing - scheduled notes can always be stopped using
          # JEM's stop button - this will stop all running timers (used by Play.note() to schedule playing of notes)
          #print "Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
