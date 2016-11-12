@@ -1,5 +1,5 @@
 ################################################################################################################
-# music.py      Version 4.6         07-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.7         12-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,9 @@
 #
 #
 # REVISIONS:
+#
+# 4.7   11-Nov-2016 (bm)  Small bug fix in Play.midi - now we pay attention to global instrument settings, i.e., Play.setInstrument(),
+#					unless instrument has been set explicitely locally (e.g., at Phrase level).
 #
 # 4.6   07-Nov-2016 (bm)  Fixed inefficiency problem in Play.midi (took forever to play long scores, e.g., > 3000 notes).  Now, things work
 #                   in real time again.
@@ -1324,8 +1327,10 @@ class Play(jPlay):
          material = Phrase(material)
       if type(material) == Phrase:   # no elif - we need to successively wrap from Note to Score
          material = Part(material)
+         material.setInstrument(-1)     # indicate no default instrument (needed to access global instrument)
       if type(material) == jPhrase:  # (also wrap jMusic default Phrases, in addition to our own)
          material = Part(material)
+         material.setInstrument(-1)     # indicate no default instrument (needed to access global instrument)
       if type(material) == Part:     # no elif - we need to successively wrap from Note to Score
          material = Score(material)
       if type(material) == Score:
@@ -1340,7 +1345,9 @@ class Play(jPlay):
          tempo = score.getTempo()    # get global tempo (can be overidden by part and phrase tempos)
          for part in score.getPartArray():   # traverse all parts
             channel = part.getChannel()        # get part channel
-            instrument = part.getInstrument()  # get part instrument
+            instrument = Play.getInstrument(channel)  # get global instrument for this channel
+            if part.getInstrument() > -1:      # has the part instrument been set?
+               instrument = part.getInstrument()  # yes, so it takes precedence
             if part.getTempo() > -1:           # has the part tempo been set?
                tempo = part.getTempo()            # yes, so update tempo
             for phrase in part.getPhraseArray():   # traverse all phrases in part
@@ -1478,6 +1485,7 @@ class Play(jPlay):
          Play.frequencyOn(pitch, velocity, channel, panning)  # start it
                   
       else:         
+
          print "Play.noteOn(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
 
 
@@ -1511,6 +1519,7 @@ class Play(jPlay):
          Play.frequencyOff(pitch, channel)  # stop it
                   
       else:         
+
          print "Play.noteOff(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
 
    def frequencyOff(frequency, channel=0):
@@ -1683,6 +1692,56 @@ class Play(jPlay):
       # by creating a list of Timers created via note() and looping through them to stop them here.
 
 
+   def setInstrument(instrument, channel=0):
+      """Send a patch change message for this channel to the Java synthesizer object."""
+      
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      channelHandle.programChange(channel, instrument)          # send the message
+
+   def getInstrument(channel=0):
+      """Gets the current instrument for this channel of the Java synthesizer object."""
+      
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      instrument = channelHandle.getProgram()                   # get the instrument
+      return instrument
+
+   def setVolume(volume, channel=0):
+      """Sets the current coarse volume for this channel to the Java synthesizer object."""
+      
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      channelHandle.controlChange(7, volume)                    # send the message
+
+   def getVolume(channel=0):
+      """Gets the current coarse volume for this channel of the Java synthesizer object."""
+
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      return channelHandle.getController(7)                     # obtain the current value for volume controller
+
+   def setPanning(panning, channel=0):
+      """Sets the current panning setting for this channel to the Java synthesizer object."""
+      
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      channelHandle.controlChange(10, panning)                  # send the message
+
+   def getPanning(channel=0):
+      """Gets the current panning setting for this channel of the Java synthesizer object."""
+
+      global Java_synthesizer
+      
+      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
+      return channelHandle.getController(10)                # obtain the current value for panning controller
+
+
    def audio(material, listOfAudioSamples):
       """Play jMusic material using a list of audio samples as voices"""
       
@@ -1806,56 +1865,6 @@ class Play(jPlay):
       
       # NOTE: In the future, we may also want to handle scheduled notes through Play.audio().  This could be done
       # by creating a list of AudioSamples and Timers created via audioNote() and looping through them to stop them here.
-
-
-   def setInstrument(instrument, channel=0):
-      """Send a patch change message for this channel to the Java synthesizer object."""
-      
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      channelHandle.programChange(channel, instrument)          # send the message
-
-   def getInstrument(channel=0):
-      """Gets the current instrument for this channel of the Java synthesizer object."""
-      
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      instrument = channelHandle.getProgram()                   # get the instrument
-      return instrument
-
-   def setVolume(volume, channel=0):
-      """Sets the current coarse volume for this channel to the Java synthesizer object."""
-      
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      channelHandle.controlChange(7, volume)                    # send the message
-
-   def getVolume(channel=0):
-      """Gets the current coarse volume for this channel of the Java synthesizer object."""
-
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      return channelHandle.getController(7)                     # obtain the current value for volume controller
-
-   def setPanning(position, channel=0):
-      """Sets the current panning setting for this channel to the Java synthesizer object."""
-      
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      channelHandle.controlChange(10, position)                 # send the message
-
-   def getPanning(channel=0):
-      """Gets the current panning setting for this channel of the Java synthesizer object."""
-
-      global Java_synthesizer
-      
-      channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
-      return channelHandle.getController(10)                # obtain the current value for panning controller
       
 
    ########################################################################
