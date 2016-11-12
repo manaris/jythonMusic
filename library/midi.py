@@ -1,5 +1,5 @@
 ################################################################################################################
-# midi.py       Version 2.0     03-Aug-2016     Marge Marshall, David Johnson, Bill Manaris, Kenneth Hanson
+# midi.py       Version 2.1     12-Nov-2016     Marge Marshall, David Johnson, Bill Manaris, Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,10 @@
 #
 #
 # REVISIONS:
+#
+#   2.1     12-Nov-2016 (bm) Updated MidiOut play() to respect global instrument settings, also updated set/getInstrument(),
+#                       set/getVolume(), set/getPanning().  MidiOut() now also accepts a preferred output device as a string.
+#                       If available, it is selected directly (without a selection display - faster!).  Same thing for MidiIn()
 #
 #   2.0     03-Aug-2016 (mm, bm) Updated MidiOut play() to include microtonal capability. Copied the updated music.py functions
 #                       frequencyOn(), noteOn(), noteOff(), setPitchBend(), getPitchBend(), freqToNote(), noteToFreq().
@@ -198,10 +202,14 @@ def noteToFreq(note):
 
 class MidiIn(Receiver):
 
-   def __init__(self):
+   def __init__(self, preferredDevice=""):
       
       # NOTE: Note that some devices, once closed, cannot be reopened.
    
+      self.preferredDevice = preferredDevice    # remember default choice (if any)
+
+      self.display        = None       # holds selection display for available MIDI devices
+
       self.waitingToSetup = True       # used to busy-wait until user has selected a MIDI input device 
       self.midiDevice = None           # holds MIDI input device asscociated with this instance
       self.midiDeviceName = None       # holds MIDI input device name (text to be displayed)
@@ -211,7 +219,7 @@ class MidiIn(Receiver):
                                        # (events are keys, functions are dictionary values)
 
       # prompt the user to connect a MIDI device to this object
-      self.selectMidiInput()            
+      self.selectMidiInput( self.preferredDevice )            
       
       # and, since above GUI is asynchronous, wait until user has selected a MIDI input device
       while(self.waitingToSetup):
@@ -246,8 +254,12 @@ class MidiIn(Receiver):
             self.midiDevice.close()
 
 
-   # creates display with available input MIDI devices and allows to select one
-   def selectMidiInput(self):
+   def selectMidiInput(self, preferredDevice=""):
+      """ Opens preferred MIDI device for input. If this device does not exist,
+          creates display with available input MIDI devices and allows to select one.
+      """
+
+      self.preferredDevice = preferredDevice                # remember default choice (if any)
 
       availDevices = MidiSystem.getMidiDeviceInfo()         # get information about MIDI devices available to the system
       self.inputDevices = {}                                # get name of device for more user friendly display
@@ -266,23 +278,32 @@ class MidiIn(Receiver):
             
       # now, only available MIDI input devices are stored in self.inputDevices
 
-      # create selection GUI
-      self.display = Display("Select MIDI Input", 400, 125) # display info to user
+      # check if preferredDevice is available
+      if self.preferredDevice in self.inputDevices.keys():
 
-      self.display.drawLabel('Select a MIDI input device from the list', 45, 30)
+         # yes it is, so select it and open it
+         self.openInputDevice( self.preferredDevice )
 
-      # create dropdown list of available MIDI input devices
-      items = self.inputDevices.keys()
-      items.sort()
-      deviceDropdown = DropDownList(items, self.openInputDevice)
-      self.display.add(deviceDropdown, 40, 50)
-      self.display.setColor( Color(124, 201, 251) )   # set color to shade of blue (for input)
+      else:  # otherwise, create menu with available devices to select
+
+         # create selection GUI
+         self.display = Display("Select MIDI Input", 400, 125) # display info to user
+
+         self.display.drawLabel('Select a MIDI input device from the list', 45, 30)
+
+         # create dropdown list of available MIDI input devices
+         items = self.inputDevices.keys()
+         items.sort()
+         deviceDropdown = DropDownList(items, self.openInputDevice)
+         self.display.add(deviceDropdown, 40, 50)
+         self.display.setColor( Color(124, 201, 251) )   # set color to shade of blue (for input)
       
    # callback for dropdown list - called when user selects a MIDI device
    def openInputDevice(self, selectedItem):
 
       # open selected input device
-      deviceInfo = self.inputDevices[selectedItem]           # get device info from dictionary
+      print 'MIDI input device set to "' + selectedItem + '".'   # let them know
+      deviceInfo = self.inputDevices[selectedItem]               # get device info from dictionary
 
       # are we on a Mac, and if so, have we opened this input device before?
       if "Mac_OS_X" in platform() and Mac_OS_X_MidiIn_Devices.has_key(deviceInfo):
@@ -314,7 +335,10 @@ class MidiIn(Receiver):
 
       # selection has been made so close display and exit busy loop in constructor
       self.waitingToSetup = False                           # no longer waiting to be setup, set to False so we can move on
-      self.display.close()                                  # close display since it is no longer needed
+
+      # is a display showing?
+      if self.display:
+         self.display.close()     # yes, so close it -- no longer needed
 
 
    def onNoteOn(self, function):
@@ -488,8 +512,8 @@ class MidiIn(Receiver):
 #       Another solution is to use another software synthesizer, e.g., SimpleSynth - http://notahat.com/simplesynth/
 #
 
-
 class MidiOut():
+
 
    # initialize pitchbend across channels to 0
    global CURRENT_PITCHBEND
@@ -499,15 +523,31 @@ class MidiOut():
 
    from jm.music.data import *
 
-   def __init__(self):
+   def __init__(self, preferredDevice=""):
+
+      self.preferredDevice = preferredDevice    # remember default choice (if any)
+
+      self.display        = None       # holds selection display for available MIDI devices
 
       self.waitingToSetup = True       # used to busy-wait until user has selected a MIDI input device 
       self.midiDevice     = None       # holds the selected output MIDI device (we may want to close it)
       self.midiDeviceName = None       # holds MIDI output device name (text to be displayed)
       self.midiReceiver   = None       # holds the selected device's MIDI receiver (to send MIDI messages to)
 
+      self.instrument = {}        # holds current instrument for each channel
+      for channel in range(16):   # initialize all to PIANO (default)
+         self.insturment = 0  
+
+      self.volume = {}            # holds current global volume
+      for channel in range(16):   # initialize all to max volume
+         self.volume[channel] = 127                
+
+      self.panning = {}           # holds current global panning
+      for channel in range(16):   # initialize all to center panning
+         self.panning[channel] = 63                
+
       # prompt user to select an existing output MIDI device
-      self.selectMidiOutput()
+      self.selectMidiOutput( self.preferredDevice )
 
       # and, since above GUI is asynchronous, wait until user has selected a MIDI output device
       while(self.waitingToSetup):
@@ -531,150 +571,13 @@ class MidiOut():
          # NOTE: maybe we shoud also send a global noteOff message to all channels?
 
 
-   def setInstrument(self, instrument, channel=0):
-      """Sets 'channel' to 'instrument' through the selected output MIDI device.""" 
-
-      self.sendMidiMessage(192, channel, instrument, 0)
-
-   def noteOn(self, pitch, velocity=100, channel=0):
-      """Send a NOTE_ON message for this pitch to the selected output MIDI device."""
-
-      if (type(pitch) == int) and (0 <= pitch <= 127):   # a MIDI pitch?
-         # yes, so convert pitch from MIDI number (int) to Hertz (float)
-         pitch = noteToFreq(pitch)       
-
-      if type(pitch) == float:        # a pitch in Hertz?
-         self.frequencyOn(pitch, velocity, channel)  # start it
-                  
-      else:         
-         print "MidiOut.noteOn(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
-
-      
-   def noteOff(self, pitch, channel=0):
-      """Send a NOTE_OFF message for this pitch to the selected output MIDI device."""
-
-      if (type(pitch) == int) and (0 <= pitch <= 127):   # a MIDI pitch?
-         # yes, so convert pitch from MIDI number (int) to Hertz (float)
-         pitch = noteToFreq(pitch)       
-
-      if type(pitch) == float:        # a pitch in Hertz?
-         self.frequencyOff(pitch, channel)  # start it
-                  
-      else:         
-         print "MidiOut.noteOff(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
-
-
-
-   def frequencyOn(self, frequency, velocity=100, channel=0):
-      """Send a NOTE_ON message for this frequency (in Hz) to the selected output MIDI device."""
-      
-      if (type(frequency) == float) and (8.17 <= frequency <= 12600.0): # a pitch in Hertz (within MIDI pitch range 0 to 127)?
-
-         pitch, bend = freqToNote( frequency )                     # convert to MIDI note and pitch bend
-
-         # also, keep track of how many overlapping instances of this pitch are currently playing on this channel
-         # so that we turn off only the last one - also see frequencyOff()
-         noteID = (pitch, channel)      # create a tuple to add to the list
-         notesCurrentlyPlaying.append(noteID)   # append the list with the tuple representing the note
-
-         self.noteOnPitchBend(pitch, bend, velocity, channel)      # and start it 
-
-      else:         
-
-         print "MidiOut.frequencyOn(): Invalid frequency " + str(frequency) + ", expected frequency in Hz from 8.17 to 12600.0 (float)."
-
-   def frequencyOff(self, frequency, channel=0):
-      """Send a NOTE_OFF message for this frequency (in Hz) to the selected output MIDI device."""
-
-      if (type(frequency) == float) and (8.17 <= frequency <= 12600.0): # a frequency in Hertz (within MIDI pitch range 0 to 127)?
-
-         pitch, bend = freqToNote( frequency )                     # convert to MIDI note and pitch bend
-
-         # also, keep track of how many overlapping instances of this frequency are currently playing on this channel
-         # so that we turn off only the last one - also see frequencyOn()
-         noteID = (pitch, channel)                   # create an ID using pitch-channel pair
-
-         notesCurrentlyPlaying.remove(noteID) #remove the noteID from the list, so that we may check for remaining instances
-         if noteID not in notesCurrentlyPlaying:   # was this the last instance of the note?
-
-            #self.sendMidiMessage(144, channel, pitch, 0)
-            self.sendMidiMessage(128, channel, pitch, 0) 
-
-
-      else:     # frequency was outside expected range    
-
-         print "MidiOut.frequencyOff(): Invalid frequency " + str(frequency) + ", expected frequency in Hz from 8.17 to 12600.0 (float)."
-
-      # NOTE: Just to be good citizens, also turn pitch bend to normal (i.e., no bend).
-      # Play.setPitchBend(0, channel)
-
-   # No (normal) pitch bend is 0, max downward bend is -8192, and max upward bend is 8191.
-   # (Result is undefined if you exceed these values - it may wrap around or it may cap.)
-   def noteOnPitchBend(self, pitch, bend = 0, velocity=100, channel=0):
-      """Send a NOTE_ON message for this pitch and pitch bend to the selected output MIDI device."""
-
-      # NOTE: The MIDI specification states that pitch is a 14-bit value, where zero is 
-      # maximum downward bend, 16383 is maximum upward bend, and 8192 is center - no pitch bend.
-      # Here we adjust for no pitch bend (center) to be 0, max downward bend to be -8192, and
-      # max upward bend to be 8191.  Also, we add the current pitchbend as set previously.
-      pitch = int(pitch)
-      pitchbend = bend + PITCHBEND_NORMAL + CURRENT_PITCHBEND[channel]  # calculate pitchbend to set
-      if (pitchbend <= PITCHBEND_MAX) and (pitchbend >= PITCHBEND_MIN):  # is pitchbend within appropriate range?
-
-         msb = int(pitchbend)/128 # find the msb values for the first byte of pitchbend data
-         lsb = int(pitchbend)%128 # find the lsb values for the finer tuning byte of pitchbend data
-
-
-         self.sendMidiMessage(224, channel, lsb, msb)
-
-      else:     # frequency was outside expected range    
-
-         print "MidiOut.noteOnPitchBend(): Invalid pitchbend " + str(pitchbend - PITCHBEND_NORMAL) + ", expected pitchbend in range -8192 to 8192."
-
-      # and send the message to start the note on this channel
-      self.sendMidiMessage(144, channel, pitch, velocity)                     # send the message
-
-   def setPitchBend(self, bend = 0, channel=0):
-      """Set global pitchbend variable to be used when a note / frequency is played."""
-
-      CURRENT_PITCHBEND[channel] = bend #this pitchbend will now be calculated into the total pitchbend by noteOnPitchBend()
-      
-   def getPitchBend(self, channel=0):
-      """returns the current pitchbend for this channel."""
-      
-      return CURRENT_PITCHBEND[channel] 
-
-      
-   def playNote(self, pitch, start, duration, velocity=100, channel=0):
-      """Plays a note with given 'start' time (in milliseconds from now), 'duration' (in milliseconds
-         from 'start' time), with given 'velocity' on 'channel' via MIDI Out.""" 
-         
-      # TODO: We should probably test for negative start times and durations.
-               
-      # create a timer for the note-on event
-      #noteOn = Timer(start, self.sendMidiOutput, [144, channel, pitch, velocity], False)
-      noteOn = Timer(start, self.noteOn, [pitch, velocity, channel], False)
-            
-      # create a timer for the note-off event (note-off is done using note-on with 0 velocity)
-      #noteOff = Timer(start+duration, self.sendMidiOutput, [144, channel, pitch, 0], False)
-      noteOff = Timer(start+duration, self.noteOff, [pitch, channel], False)
-
-      # and activate timers (set thinsg in motion)
-      noteOn.start()
-      noteOff.start()
-      
-      # NOTE:  Upon completion of this function, the two Timer objects become unreferenced.
-      #        When the timers elapse, then the two objects (in theory) should be garbage-collectable,
-      #        and should be eventually cleaned up.  So, here, no effort is made in reusing timer objects, etc.
-
-
    def play(self, material):
-      """Play jMusic material (Score, Part, Phrase, Note) via MIDI Out."""
+      """Play jMusic material (Score, Part, Phrase, Note) using the MIDI output device."""
       
       from music import Note, Phrase, Part, Score, REST
       from jm.music.data import Phrase as jPhrase   # since we redefine Phrase
       from jm.music.data import Note as jNote  # needed to wrap more functionality below
-      
+
       # do necessary datatype wrapping (MidiSynth() expects a Score)
       if type(material) == Note:
          material = Phrase(material)
@@ -682,8 +585,10 @@ class MidiOut():
          material = Phrase(material)
       if type(material) == Phrase:   # no elif - we need to successively wrap from Note to Score
          material = Part(material)
+         material.setInstrument(-1)     # indicate no default instrument (needed to access global instrument)
       if type(material) == jPhrase:  # (also wrap jMusic default Phrases, in addition to our own)
          material = Part(material)
+         material.setInstrument(-1)     # indicate no default instrument (needed to access global instrument)
       if type(material) == Part:     # no elif - we need to successively wrap from Note to Score
          material = Score(material)
       if type(material) == Score:
@@ -692,12 +597,15 @@ class MidiOut():
 
          score = material   # by now, material is a score, so create an alias (for readability)
 
+
          # loop through all parts and phrases to get all notes
          noteList = []               # holds all notes
          tempo = score.getTempo()    # get global tempo (can be overidden by part and phrase tempos)
          for part in score.getPartArray():   # traverse all parts
             channel = part.getChannel()        # get part channel
-            instrument = part.getInstrument()  # get part instrument
+            instrument = self.getInstrument(channel)  # get global instrument for this channel
+            if part.getInstrument() > -1:      # has the part instrument been set?
+               instrument = part.getInstrument()  # yes, so it takes precedence
             if part.getTempo() > -1:           # has the part tempo been set?
                tempo = part.getTempo()            # yes, so update tempo
             for phrase in part.getPhraseArray():   # traverse all phrases in part
@@ -710,25 +618,32 @@ class MidiOut():
                # (this needs to happen here every time, as we may be using the tempo from score, part, or phrase)
                FACTOR = 1000 * 60.0 / tempo   
 
-               for index in range(phrase.length()):      # traverse all notes in this phrase
-                  note = phrase.getNote(index)              # and extract needed note data
+               # process notes in this phrase
+               startTime = phrase.getStartTime() * FACTOR   # in milliseconds
+               for note in phrase.getNoteArray():
                   frequency = note.getFrequency()
-                  start = int(phrase.getNoteStartTime(index) * FACTOR)  # get time and convert to milliseconds
-                  duration = int(note.getLength() * FACTOR)           # get duration and convert to milliseconds
+                  panning = note.getPan()
+                  panning = mapValue(panning, 0.0, 1.0, 0, 127)    # map from range 0.0..1.0 (Note panning) to range 0..127 (as expected by Java synthesizer)
+                  start = int(startTime)                           # remember this note's start time (in milliseconds)
+
+                  # NOTE:  Below we use note length as opposed to duration (getLength() vs. getDuration())
+                  # since note length gives us a more natural sounding note (with proper decay), whereas 
+                  # note duration captures the more formal (printed score) duration (which sounds unnatural).
+                  duration = int(note.getLength() * FACTOR)             # get note length (as oppposed to duration!) and convert to milliseconds
+                  startTime = startTime + note.getDuration() * FACTOR   # update start time (in milliseconds)
                   velocity = note.getDynamic()
                    
                   # accumulate non-REST notes
                   if (frequency != REST):
-                     noteList.append((start, duration, frequency, velocity, channel, instrument))   # put start time first and duration second, so we can sort easily by start time (below),
+                     noteList.append((start, duration, frequency, velocity, channel, instrument, panning))   # put start time first and duration second, so we can sort easily by start time (below),
                      # and so that notes that are members of a chord as denoted by having a duration of 0 come before the note that gives the specified chord duration
                    
          # sort notes by start time
          noteList.sort()
-       
 
          # Schedule playing all notes in noteList
          chordNotes = []      # used to process notes belonging in a chord
-         for start, duration, pitch, velocity, channel, instrument in noteList:
+         for start, duration, pitch, velocity, channel, instrument, panning in noteList:
             # set appropriate instrument for this channel
             self.setInstrument(instrument, channel)
 
@@ -736,36 +651,291 @@ class MidiOut():
             # Chords are denoted by a sequence of notes having the same start time and 0 duration (except the last note
             # of the chord).
             if duration == 0:   # does this note belong in a chord?
-               chordNotes.append([start, duration, pitch, velocity, channel])  # add it to the list of chord notes
+               chordNotes.append([start, duration, pitch, velocity, channel, panning])  # add it to the list of chord notes
                
             elif chordNotes == []:   # is this a regular, solo note (not part of a chord)?
                
                # yes, so schedule it to play via a Play.note event
-               self.playNote(pitch, start, duration, velocity, channel)
+               self.note(pitch, start, duration, velocity, channel, panning)
                #print "Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
 
             else:   # note has a normal duration and it is part of a chord
 
-               # add this note together with this other chord notes
-               chordNotes.append([start, duration, pitch, velocity, channel])
+               # first, add this note together with this other chord notes
+               chordNotes.append([start, duration, pitch, velocity, channel, panning])
                
                # now, schedule all notes in the chord list using last note's duration
-               for start, ignoreThisDuration, pitch, velocity, channel in chordNotes:
+               for start, ignoreThisDuration, pitch, velocity, channel, panning in chordNotes:
                   # schedule this note using chord's duration (provided by the last note in the chord)
-                  self.playNote(pitch, start, duration, velocity, channel)
+                  self.note(pitch, start, duration, velocity, channel, panning)
                   #print "Chord: Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
                # now, all chord notes have been scheduled
 
                # so, clear chord notes to continue handling new notes (if any)
                chordNotes = []
-
-
-      else:   # error check    
-         print "Play.midi() - Unrecognized type", type(material), "- expected Note, Phrase, Part, or Score."
-
+   
          # now, all notes have been scheduled for future playing - scheduled notes can always be stopped using
          # JEM's stop button - this will stop all running timers (used by Play.note() to schedule playing of notes)
          #print "Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
+
+      else:   # error check    
+         print "Play.midi(): Unrecognized type " + str(type(material)) + ", expected Note, Phrase, Part, or Score."
+
+
+   # NOTE:  Here we connect noteOn() and frequencyOn() with noteOnPitchBend() to allow for 
+   # playing microtonal music.  Although this may seem as cyclical (i.e., that in noteOn() we 
+   # convert pitch to frequency, and then call frequencyOn() which convert the frequency back to pitch,
+   # so that it can call noteOnPitchBend() ), this is the only way we can make everything work.
+   # We are constrained by the fact that jMusic Note objects are limited in how they handle pitch and
+   # frequency (i.e., that creating a Note with pitch will set the Note's corresponding frequency,
+   # but not the other way around), and the fact that we can call Note.getFrequency() above in Play.midi()
+   # without problem, but NOT Note.getPitch(), which will crash if the Note was instantiated with a frequency
+   # (i.e., pitch is not available / set).
+   # Therefore, we need to make the run about here, so that we keep everything else easier to code / maintain,
+   # and also keep the API (creating and play notes) simpler.  So, do NOT try to simplify the following code,
+   # as it is the only way (I think) that can make everything else work simply - also see Play.midi().
+   def noteOn(self, pitch, velocity=100, channel=0, panning = -1):
+      """Send a NOTE_ON message for this pitch to the selected output MIDI device.  Default panning of -1 means to
+         use the default (global) panning setting of the selected MIDI device."""
+
+      if (type(pitch) == int) and (0 <= pitch <= 127):   # a MIDI pitch?
+         # yes, so convert pitch from MIDI number (int) to Hertz (float)
+         pitch = noteToFreq(pitch)       
+
+      if type(pitch) == float:        # a pitch in Hertz?
+         self.frequencyOn(pitch, velocity, channel, panning)  # start it
+                  
+      else:         
+
+         print "MidiOut.noteOn(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
+
+
+   def frequencyOn(self, frequency, velocity=100, channel=0, panning = -1):
+      """Send a NOTE_ON message for this frequency (in Hz) to the selected output MIDI device.  Default panning of -1 means to
+         use the default (global) panning setting of the MIDI device."""
+      
+      if (type(frequency) == float) and (8.17 <= frequency <= 12600.0): # a pitch in Hertz (within MIDI pitch range 0 to 127)?
+
+         pitch, bend = freqToNote( frequency )                     # convert to MIDI note and pitch bend
+
+         # also, keep track of how many overlapping instances of this pitch are currently sounding on this channel
+         # so that we turn off only the last one - also see frequencyOff()
+         noteID = (pitch, channel)              # create an ID using pitch-channel pair
+         notesCurrentlyPlaying.append(noteID)   # add this note instance to list
+
+         self.noteOnPitchBend(pitch, bend, velocity, channel, panning)      # and start it 
+
+      else:         
+
+         print "MidiOut.frequencyOn(): Invalid frequency " + str(frequency) + ", expected frequency in Hz from 8.17 to 12600.0 (float)."
+ 
+
+   def noteOff(self, pitch, channel=0):
+      """Send a NOTE_OFF message for this pitch to the selected output MIDI device."""
+
+      if (type(pitch) == int) and (0 <= pitch <= 127):   # a MIDI pitch?
+         # yes, so convert pitch from MIDI number (int) to Hertz (float)
+         pitch = noteToFreq(pitch)       
+
+      if type(pitch) == float:        # a pitch in Hertz?
+         self.frequencyOff(pitch, channel)  # stop it
+                  
+      else:         
+
+         print "MidiOut.noteOff(): Unrecognized pitch " + str(pitch) + ", expected MIDI pitch from 0 to 127 (int), or frequency in Hz from 8.17 to 12600.0 (float)."
+
+   def frequencyOff(self, frequency, channel=0):
+      """Send a NOTE_OFF message for this frequency (in Hz) to the selected output MIDI device."""
+      
+      if (type(frequency) == float) and (8.17 <= frequency <= 12600.0): # a frequency in Hertz (within MIDI pitch range 0 to 127)?
+
+         pitch, bend = freqToNote( frequency )                     # convert to MIDI note and pitch bend
+
+         # also, keep track of how many overlapping instances of this frequency are currently playing on this channel
+         # so that we turn off only the last one - also see frequencyOn()
+         noteID = (pitch, channel)                   # create an ID using pitch-channel pair
+
+         # next, remove this noteID from the list, so that we may check for remaining instances
+         notesCurrentlyPlaying.remove(noteID)        # remove noteID
+         if noteID not in notesCurrentlyPlaying:     # is this last instance of note?
+
+            # yes, so turn it off!
+            self.sendMidiMessage(128, channel, pitch, 0) 
+
+      else:     # frequency was outside expected range    
+
+         print "MidiOut.frequencyOff(): Invalid frequency " + str(frequency) + ", expected frequency in Hz from 8.17 to 12600.0 (float)."
+
+      # NOTE: Just to be good citizens, also turn pitch bend to normal (i.e., no bend).
+      # Play.setPitchBend(0, channel)
+
+
+   def note(self, pitch, start, duration, velocity=100, channel=0, panning = -1):
+      """Plays a note with given 'start' time (in milliseconds from now), 'duration' (in milliseconds
+         from 'start' time), with given 'velocity' on 'channel'.  Default panning of -1 means to
+         use the default (global) panning setting of the MIDI output device. """ 
+         
+      # TODO: We should probably test for negative start times and durations.
+         
+      # create a timer for the note-on event
+      noteOn = Timer2(start, self.noteOn, [pitch, velocity, channel, panning], False)
+
+      # create a timer for the note-off event
+      noteOff = Timer2(start+duration, self.noteOff, [pitch, channel], False)
+
+      # and activate timers (set things in motion)
+      noteOn.start()
+      noteOff.start()
+      
+      # NOTE:  Upon completion of this function, the two Timer objects become unreferenced.
+      #        When the timers elapse, then the two objects (in theory) should be garbage-collectable,
+      #        and should be eventually cleaned up.  So, here, no effort is made in reusing timer objects, etc.
+
+   def frequency(self, frequency, start, duration, velocity=100, channel=0, panning = -1):
+      """Plays a frequency with given 'start' time (in milliseconds from now), 'duration' (in milliseconds
+         from 'start' time), with given 'velocity' on 'channel'.  Default panning of -1 means to
+         use the default (global) panning setting of the MIDI output device.""" 
+         
+      # NOTE:  We assume that the end-user will ensure that concurrent microtones end up on
+      # different channels.  This is needed since MIDI has only one pitch band per channel,
+      # and most microtones require their unique pitch bending.
+
+      # TODO: We should probably test for negative start times and durations.
+         
+      # create a timer for the frequency-on event
+      frequencyOn = Timer2(start, self.frequencyOn, [frequency, velocity, channel, panning], False)
+
+      # create a timer for the frequency-off event
+      frequencyOff = Timer2(start+duration, self.frequencyOff, [frequency, channel], False)
+
+      # call pitchBendNormal to turn off the timer, if it is on
+      #setPitchBendNormal(channel)
+      # and activate timers (set things in motion)
+      frequencyOn.start()
+      frequencyOff.start()
+ 
+      #setPitchBendNormal(channel, start+duration, True)
+
+
+   def setPitchBend(self, bend = 0, channel=0):
+      """Set global pitchbend variable to be used when a note / frequency is played."""
+
+      CURRENT_PITCHBEND[channel] = bend #this pitchbend will now be calculated into the total pitchbend by noteOnPitchBend()
+      
+   def getPitchBend(self, channel=0):
+      """returns the current pitchbend for this channel."""
+      
+      return CURRENT_PITCHBEND[channel] 
+
+
+   def noteOnPitchBend(self, pitch, bend = 0, velocity=100, channel=0, panning = -1):
+      """Send a NOTE_ON message for this pitch and pitch bend to the selected output MIDI device.  
+         Default panning of -1 means to use the default (global) panning setting of the MIDI device."""
+            
+      self.setPitchBend(bend, channel)  # remember current pitchbend for this channel
+
+      # now, really set the pitchbend on the MIDI output device (this is the only place this is done!)      
+
+      # NOTE: The MIDI specification states that pitch is a 14-bit value, where zero is 
+      # maximum downward bend, 16383 is maximum upward bend, and 8192 is center - no pitch bend.
+      # Here we adjust for no pitch bend (center) to be 0, max downward bend to be -8192, and
+      # max upward bend to be 8191.  Also, we add the current pitchbend as set previously.
+      pitchbend = bend + PITCHBEND_NORMAL + CURRENT_PITCHBEND[channel]   # calculate pitchbend to set
+      if (pitchbend <= PITCHBEND_MAX) and (pitchbend >= PITCHBEND_MIN):  # is pitchbend within appropriate range?
+
+         msb = int(pitchbend) / 128 # find the msb values for the first byte of pitchbend data
+         lsb = int(pitchbend) % 128 # find the lsb values for the finer tuning byte of pitchbend data
+
+         # send pitch bend MIDI message
+         # *** see http://computermusicresource.com/MIDI.Commands.html
+         self.sendMidiMessage(224, channel, lsb, msb)
+
+      else:     # frequency was outside expected range    
+
+         print "MidiOut.noteOnPitchBend(): Invalid pitchbend " + str(pitchbend - PITCHBEND_NORMAL) + ", expected pitchbend in range -8192 to 8192."
+
+      # and send the message to start the note on this channel
+      if panning != -1:                              # if we have a specific panning,
+         
+         self.sendMidiMessage(176, channel, 10, panning)   # then, use it (otherwise let default / global panning stand)
+         # (see controller numbers - http://www.indiana.edu/~emusic/cntrlnumb.html)
+
+      self.sendMidiMessage(144, channel, pitch, velocity)  # send the message
+
+
+   def allNotesOff(self):
+      """It turns off all notes on all channels."""
+
+      self.allFrequenciesOff()   
+      
+
+   def allFrequenciesOff(self):
+      """It turns off all notes on all channels."""
+
+      for channel in range(16):  # cycle through all channels
+
+         self.sendMidiMessage(176, channel, 123, 0)        # send message for "All Notes Off" (123)
+         # (see controller numbers - http://www.indiana.edu/~emusic/cntrlnumb.html)
+
+         # also reset pitch bend
+         self.setPitchBend(0, channel)      
+
+
+   def stop(self):
+      """It stops all MIDI music from sounding."""
+      
+      # NOTE:  This could also handle self.note() notes, which may have been
+      #        scheduled to start sometime in the future.  For now, we assume that timer.py
+      #        (which provides Timer objects) handles stopping of timers on its own.  If so,
+      #        this takes care of our problem, for all practical purposes.  It is possible
+      #        to have a race condition (i.e., a note that starts playing right when stop()
+      #        is called, but a second call of stop() (e.g., double pressing of a stop button)
+      #        will handle this, so we do not concern ourselves with it.
+            
+      # then, stop all sounding notes
+      self.allNotesOff()
+
+      # NOTE: In the future, we may also want to handle scheduled notes through self.note().  This could be done
+      # by creating a list of Timers created via note() and looping through them to stop them here.
+
+
+   def setInstrument(self, instrument, channel=0):
+      """Sets 'channel' to 'instrument' for this channel of  the  output MIDI device.""" 
+
+      self.instrument[channel] = instrument                # remember it
+      self.sendMidiMessage(192, channel, instrument, 0)    # and set it
+      # (see controller numbers - http://www.indiana.edu/~emusic/cntrlnumb.html)
+
+   def getInstrument(self, channel=0):
+      """Gets the current instrument for this channel of the output MIDI device."""
+      
+      return self.instrument[channel]
+
+
+   def setVolume(self, volume, channel=0):
+      """Sets the current coarse volume for this channel of the output MIDI device."""
+      
+      self.volume[channel] = volume                    # remember it
+      self.sendMidiMessage(176, channel, 7, volume)    # and set it (7 is controller number for global / main volume)
+      # (see controller numbers - http://www.indiana.edu/~emusic/cntrlnumb.html)
+
+   def getVolume(self, channel=0):
+      """Gets the current coarse volume for this channel of the output MIDI device."""
+
+      return self.volume[channel]
+
+
+   def setPanning(self, panning, channel=0):
+      """Sets the current panning setting for this channel of the output MIDI device."""
+      
+      self.panning[channel] = panning                   # remember it
+      self.sendMidiMessage(176, channel, 10, panning)   # then, use it (otherwise let default / global panning stand)
+      # (see controller numbers - http://www.indiana.edu/~emusic/cntrlnumb.html)
+
+   def getPanning(self, channel=0):
+      """Gets the current panning setting for this channel of the output MIDI device."""
+
+      return self.panning[channel]
 
       
    ####### function to output MIDI message through selected output MIDI device ########
@@ -782,8 +952,12 @@ class MidiOut():
 
    ####### helper functions ########
    
-   # creates display with available output MIDI devices and allows to select one
-   def selectMidiOutput(self):
+   def selectMidiOutput(self, preferredDevice=""):
+      """ Opens preferred MIDI device for output. If this device does not exist,
+          creates display with available output MIDI devices and allows to select one.
+      """
+
+      self.preferredDevice = preferredDevice                # remember default choice (if any)
 
       availDevices = MidiSystem.getMidiDeviceInfo()         # get information about MIDI devices available to the system
       self.outputDevices = {}                               # get name of device for more user friendly display
@@ -806,32 +980,43 @@ class MidiOut():
             
          # now, only available MIDI output devices are stored in self.outputDevices
 
-      # create selection GUI
-      self.display = Display("Select MIDI Output", 400, 125) # display info to user
+      # check if preferredDevice is available
+      if self.preferredDevice in self.outputDevices.keys():
 
-      self.display.drawLabel('Select a MIDI output device from the list', 45, 30)
+         # yes it is, so select it and open it
+         self.openOutputDevice( self.preferredDevice )
 
-      # create dropdown list of available MIDI input devices
-      items = self.outputDevices.keys()
-      items.sort()
-      deviceDropdown = DropDownList(items, self.openOutputDevice)
-      self.display.add(deviceDropdown, 40, 50)
-      self.display.setColor( Color(255, 153, 153) )   # set color to shade of red (for output)
+      else:  # otherwise, create menu with available devices to select
+
+         # create selection GUI
+         self.display = Display("Select MIDI Output", 400, 125) # display info to user
+
+         self.display.drawLabel('Select a MIDI output device from the list', 45, 30)
+
+         # create dropdown list of available MIDI input devices
+         items = self.outputDevices.keys()
+         items.sort()
+         deviceDropdown = DropDownList(items, self.openOutputDevice)
+         self.display.add(deviceDropdown, 40, 50)
+         self.display.setColor( Color(255, 153, 153) )   # set color to shade of red (for output)
 
    # callback for dropdown list
    def openOutputDevice(self, selectedItem):
 
       # open selected input device
-      #print "Sending MIDI Output to", selectedItem
-      deviceInfo = self.outputDevices[selectedItem]          # get device info from dictionary
-      self.midiDevice = MidiSystem.getMidiDevice(deviceInfo) # get selected device from Midi System
-      self.midiDeviceName = selectedItem                     # remember device text name
-      self.midiDevice.open()   # open it
-      self.midiReceiver = self.midiDevice.getReceiver()      # get receiver to send messages to
+      print 'MIDI output device set to "' + selectedItem + '".'   # let them know
+      deviceInfo = self.outputDevices[selectedItem]               # get device info from dictionary
+      self.midiDevice = MidiSystem.getMidiDevice(deviceInfo)      # get selected device from Midi System
+      self.midiDeviceName = selectedItem                          # remember device text name
+      self.midiDevice.open()                                      # open it
+      self.midiReceiver = self.midiDevice.getReceiver()           # get receiver to send messages to
 
       # selection has been made so close display and exit busy loop in constructor
       self.waitingToSetup = False                            # no longer waiting to be setup, set to False so we can move on
-      self.display.hide()                                    # close display since it is no longer needed
+
+      # is a display showing?
+      if self.display:
+         self.display.close()     # yes, so close it -- no longer needed
 
 
 ######################################################################################
