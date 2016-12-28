@@ -28,8 +28,8 @@
 #
 # REVISIONS:
 #
-# 4.9   27-Dec-2016 (bm)  Fixed jMusic Note bug, where, if int pitch is given, both frequency and pitch attributes are populated, but 
-#					if float pitch is given (i.e., frequency in Hertz), only the frequency attribute is populated - no pitch).
+# 4.9   27-Dec-2016 (bm)  Fixed jMusic Note bug, where, if int pitch was given, both frequency and pitch attributes were populated, but 
+#					if float pitch was given (i.e., frequency in Hertz), only the frequency attribute was populated - no pitch).
 #					Consequently, in the second case, calling getPitch() crashes the system.  We fix it by also calling setFrequency()
 #					or setPitch() in our wrapper of the Note constructor.  Also added getPitch() and getPitchBend() to fully convert
 #					a frequency to MIDI pitch information.
