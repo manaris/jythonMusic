@@ -1,5 +1,5 @@
 ################################################################################################################
-# music.py      Version 4.7         12-Nov-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.9         27-Dec-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,17 @@
 #
 #
 # REVISIONS:
+#
+# 4.9   27-Dec-2016 (bm)  Fixed jMusic Note bug, where, if int pitch is given, both frequency and pitch attributes are populated, but 
+#					if float pitch is given (i.e., frequency in Hertz), only the frequency attribute is populated - no pitch).
+#					Consequently, in the second case, calling getPitch() crashes the system.  We fix it by also calling setFrequency()
+#					or setPitch() in our wrapper of the Note constructor.  Also added getPitch() and getPitchBend() to fully convert
+#					a frequency to MIDI pitch information.
+#
+# 4.8   26-Dec-2016 (mm)  Added Envelope class for using with Play.audio().  An envelope contains a list of attack times (in milliseconds, 
+#					relative from the previous time) and values (to reach at those times), how long to wait (delay time, in milliseconds, 
+#					relative from the previous time) to get to a sustain value, and then how long to wait to reach a value of zero 
+#					(in milliseconds, relative from the end time).  Also modified Play.audio() to accept an Envelope as an optional parameter.
 #
 # 4.7   11-Nov-2016 (bm)  Small bug fix in Play.midi - now we pay attention to global instrument settings, i.e., Play.setInstrument(),
 #					unless instrument has been set explicitely locally (e.g., at Phrase level).
@@ -657,7 +668,6 @@ def xfrange(start, stop, step):
       else:
          done = start <= stop
 
-
 ######################################################################################
 #### jMusic library extensions #########################################################
 ######################################################################################
@@ -1006,6 +1016,89 @@ class Write(jWrite):
 #### jMusic Note extensions ########################################################
 ######################################################################################
 
+###############################################################################
+# freqToNote   Convert frequency to MIDI note number
+#        freqToNote(f) converts frequency to the closest MIDI note
+#        number with pitch bend value for finer control.  A4 corresponds to 
+#        the note number 69 (concert pitch is set to 440Hz by default).  
+#        The default pitch bend range is 2 half tones above and below.
+# 
+#        2005-10-13 by MARUI Atsushi
+#        See http://www.geidai.ac.jp/~marui/octave/node3.html
+#
+# For example, "sliding" from A4 (MIDI pitch 69, frequency 440 Hz) 
+#              to a bit over AS4 (MIDI pitch 70, frequency 466.1637615181 Hz).
+#
+#>>>for f in range(440, 468):                                       
+#...    print freqToNote(f)
+#... 
+#(69, 0)
+#(69, 322)
+#(69, 643)
+#(69, 964)
+#(69, 1283)
+#(69, 1603)
+#(69, 1921)
+#(69, 2239)
+#(69, 2555)
+#(69, 2872)
+#(69, 3187)
+#(69, 3502)
+#(69, 3816)
+#(70, -4062)
+#(70, -3750)
+#(70, -3438)
+#(70, -3126)
+#(70, -2816)
+#(70, -2506)
+#(70, -2196)
+#(70, -1888)
+#(70, -1580)
+#(70, -1272)
+#(70, -966)
+#(70, -660)
+#(70, -354)
+#(70, -50)
+#(70, 254)
+#
+# The above overshoots AS4 (MIDI pitch 70, frequency 466.1637615181 Hz).
+# So, here is converting the exact frequency:
+#
+#>>> freqToNote(466.1637615181) 
+#(70, 0)
+###############################################################################
+
+def freqToNote(frequency):
+   """Converts frequency to the closest MIDI note number with pitch bend value 
+      for finer control.  A4 corresponds to the note number 69 (concert pitch
+      is set to 440Hz by default).  The default pitch bend range is 4 half tones.
+   """
+   
+   from math import log
+   
+   concertPitch = 440.0   # 440Hz
+   bendRange = 4          # 4 half tones (2 below, 2 above)
+    
+   x = log(frequency / concertPitch, 2) * 12 + 69
+   note = round(x)
+   pitchBend = round((x - note) * 8192 / bendRange * 2)
+
+   return int(note), int(pitchBend)
+
+
+def noteToFreq(note):
+   """Converts a MIDI note to the corresponding frequency.  A4 corresponds to the note number 69 (concert pitch
+      is set to 440Hz by default).
+   """
+   
+   concertPitch = 440.0   # 440Hz
+
+   frequency = concertPitch * 2 ** ( (note - 69) / 12.0 )
+    
+   return frequency
+
+
+
 from jm.music.data import *
 from jm.music.data import Note as jNote  # needed to wrap more functionality below
 
@@ -1046,10 +1139,17 @@ class Note(jNote):
 
       # NOTE: jMusic Notes if int pitch is given, they populate both frequency and pitch;
       # (if float pitch is given, they treat if as frequency and populate only frequency - no pitch).
-      # We use this below, in Play.midi() to extract frequency from notes to play, regardless of how
-      # they were created (via int pitch or via float pitch).
+      # This is a bug.  Below, we fix it by also using setPitch() or setFrequency(), which may appear
+      # redundant, but they fix this problem (as they do the proper cross-updating of pitch and frequency).
 
-   # also, fix set duration to also adjust length proportionally
+      # fix jMusic Note bug (see above)
+      if type(value) == int:
+      	 self.setPitch(value)
+      elif type(value) == float:
+      	 self.setFrequency(value)
+    
+
+   # fix set duration to also adjust length proportionally
    def setDuration(self, duration):
    
       # calculate length fector from original values
@@ -1059,8 +1159,30 @@ class Note(jNote):
       jNote.setDuration(self, duration )
       self.setLength(duration * lengthFactor )
 
-   # also, define set and get pitch
-   #def setPitch
+   # fix error message returned from getPitch() if frequency and pitch are not equivalent
+   def getPitch(self):
+   
+      # get frequency
+      frequency = self.getFrequency()
+      
+      # and calculate corresponding pitch and pith bend
+      pitch, bend = freqToNote(frequency)
+
+      # return only pitch
+      return pitch
+
+   # also, create a way to get the difference between frequency and pitch, in pitch bend units (see Play class)
+   def getPitchBend(self):
+   
+      # get frequency
+      frequency = self.getFrequency()
+      
+      # and calculate corresponding pitch and pith bend
+      pitch, bend = freqToNote(frequency)
+
+      # return only pitch bend (from 0 to )
+      return bend + PITCHBEND_NORMAL
+
 
 ######################################################################################
 #### jMusic Phrase extensions ########################################################
@@ -1147,8 +1269,8 @@ from jm.util import Play as jPlay  # needed to wrap more functionality below
 from javax.sound.midi import *
 
 # NOTE: Opening the Java synthesizer below generates some low-level noise in the audio output.
-# But we need it to be open, in clase the end-user wishes to use functions like Play.noteOn(), below. 
-# (  Is there a way to open it just-in-time, and/or close it when not used? I cannot think of one.)
+# But we need it to be open, in case the end-user wishes to use functions like Play.noteOn(), below. 
+# ( *** Is there a way to open it just-in-time, and/or close it when not used? I cannot think of one.)
  
 Java_synthesizer = MidiSystem.getSynthesizer()  # get a Java synthesizer
 Java_synthesizer.open()                         # and activate it (should we worry about close()???)
@@ -1156,6 +1278,7 @@ Java_synthesizer.open()                         # and activate it (should we wor
 # make all instruments available
 Java_synthesizer.loadAllInstruments(Java_synthesizer.getDefaultSoundbank())   
  
+
 # The MIDI specification stipulates that pitch bend be a 14-bit value, where zero is 
 # maximum downward bend, 16383 is maximum upward bend, and 8192 is the center (no pitch bend).
 PITCHBEND_MIN = 0 
@@ -1167,100 +1290,7 @@ CURRENT_PITCHBEND = {}    # holds pitchbend to be used when playing a note / fre
 for i in range(16):
    CURRENT_PITCHBEND[i] = 0   # set this channel's pitchbend to zero
 
-###############################################################################
-# freqToNote   Convert frequency to MIDI note number
-#        freqToNote(f) converts frequency to the closest MIDI note
-#        number with pitch bend value for finer control.  A4 corresponds to 
-#        the note number 69 (concert pitch is set to 440Hz by default).  
-#        The default pitch bend range is 2 half tones above and below.
-# 
-#        2005-10-13 by MARUI Atsushi
-#        See http://www.geidai.ac.jp/~marui/octave/node3.html
-#
-# For example, "sliding" from A4 (MIDI pitch 69, frequency 440 Hz) 
-#              to a bit over AS4 (MIDI pitch 70, frequency 466.1637615181 Hz).
-#
-#>>>for f in range(440, 468):                                       
-#...    print freqToNote(f)
-#... 
-#(69, 0)
-#(69, 322)
-#(69, 643)
-#(69, 964)
-#(69, 1283)
-#(69, 1603)
-#(69, 1921)
-#(69, 2239)
-#(69, 2555)
-#(69, 2872)
-#(69, 3187)
-#(69, 3502)
-#(69, 3816)
-#(70, -4062)
-#(70, -3750)
-#(70, -3438)
-#(70, -3126)
-#(70, -2816)
-#(70, -2506)
-#(70, -2196)
-#(70, -1888)
-#(70, -1580)
-#(70, -1272)
-#(70, -966)
-#(70, -660)
-#(70, -354)
-#(70, -50)
-#(70, 254)
-#
-# The above overshoots AS4 (MIDI pitch 70, frequency 466.1637615181 Hz).
-# So, here is converting the exact frequency:
-#
-#>>> freqToNote(466.1637615181) 
-#(70, 0)
-###############################################################################
-
-def freqToNote(frequency):
-   """Converts frequency to the closest MIDI note number with pitch bend value 
-      for finer control.  A4 corresponds to the note number 69 (concert pitch
-      is set to 440Hz by default).  The default pitch bend range is 4 half tones.
-   """
-   
-   from math import log
-   
-   concertPitch = 440.0   # 440Hz
-   bendRange = 4          # 4 half tones (2 below, 2 above)
-    
-   x = log(frequency / concertPitch, 2) * 12 + 69
-   note = round(x)
-   pitchBend = round((x - note) * 8192 / bendRange * 2)
-
-   return int(note), int(pitchBend)
-
-
-def noteToFreq(note):
-   """Converts a MIDI note to the corresponding frequency.  A4 corresponds to the note number 69 (concert pitch
-      is set to 440Hz by default).
-   """
-   
-   concertPitch = 440.0   # 440Hz
-
-   frequency = concertPitch * 2 ** ( (note - 69) / 12.0 )
-    
-   return frequency
-
-# def noteToFreqOld(note, pitchBend):
-#    """Converts a MIDI note and pitch bend to the corresponding frequency.  A4 corresponds to the note number 69 (concert pitch
-#       is set to 440Hz by default).  The default pitch bend range is 4 half tones.
-#    """
-   
-#    concertPitch = 440.0   # 440Hz
-#    bendRange = 4          # 4 half tones (2 below, 2 above)
-
-#    frequency = concertPitch * 2 ** ( (note - 69) / 12.0 + (pitchBend - 8192) / 4096*12 )  # this does NOT work yet
-    
-#    return frequency
-   
-    
+  
 #########
 # NOTE:  The following code addresses Play.midi() functionality.  In order to be able to stop music
 # that is currently playing, we wrap the jMusic Play class inside a Python Play class and rebuild 
@@ -1306,8 +1336,108 @@ def __stopMidiSynths__():
       if midiSynth.isPlaying():    # if playing, stop it
          midiSynth.stop()
    
-      
+
 #########
+# An envelope contains a list of attack times (in milliseconds, relative from the previous time) and values (to reach at those times), 
+# how long to wait (delay time, in milliseconds, relative from the previous time) to get to a sustain value, and 
+# then how long to wait to reach a value of zero (in milliseconds, relative from the end time).
+
+class Envelope():
+    def __init__(self, attackTimes = [2], attackValues = [1.0], delayTime = 1, sustainValue = 1.0, releaseTime = 2):
+
+        # make sure attack times and values are parallel
+        if len(attackValues) != len(attackTimes):
+
+            raise IndexError("Envelope: attack times and values need to have the same length")
+
+        else:  # all seems well 
+
+            self.attackTimes = attackTimes    # in milliseconds, relative from the previous time...
+            self.attackValues = attackValues  # and the corresponding values
+            self.delayTime = delayTime        # in milliseconds, relative from the previous time...
+            self.sustainValue = sustainValue  # to reach this value
+            self.releaseTime = releaseTime    # in milliseconds, relative from the end time
+
+    # get list of attack times
+    def getAttackTimes(self):
+        return self.attackTimes
+
+    # get list of attack values
+    def getAttackValues(self):
+        return self.attackValues
+
+    # get list of lists - first element is list of attack times and second element is list attack values
+    def getAttackTimesAndValues(self):
+        return [self.attackTimes, self.attackValues]
+
+    # update attack times
+    def setAttackTimes(self, attackTimes):
+        # make sure attack times and values are parallel
+        if len(self.attackValues) != len(attackTimes):
+
+            raise IndexError("Envelope.setAttackTimes(): attack times and values need to have the same length")
+
+        else:  # all seems well 
+            self.attackTimes = attackTimes
+
+    # 
+    def setAttackValues(self, attackValues):
+        # make sure attack times and values are parallel
+        if len(attackValues) != len(self.attackTimes):
+
+            raise IndexError("Envelope.setAttackValues(): attack times and values need to have the same length")
+
+        else:  # all seems well 
+            self.attackValues = attackValues
+
+    def setAttackTimesAndValues(self, attackTimes, attackValues):
+        # make sure attack times and values are parallel
+        if len(self.attackValues) != len(attackTimes):
+
+            raise IndexError("Envelope.setAttackTimesAndValues(): attack times and values need to have the same length")
+
+        else:  # all seems well 
+            self.attackTimes = attackTimes            
+            self.attackValues = attackValues
+
+    def getSustain(self):
+        return self.sustainValue
+
+    def setSustain(self, sustainValue):
+        self.sustainValue = sustainValue
+
+    def getDelay(self):
+        return self.delayTime
+
+    def setDelay(self, delayTime):
+        self.delayTime = delayTime
+       
+    def getRelease(self):
+        return self.releaseTime
+
+    #update release
+    def setRelease(self, releaseTime):
+        self.releaseTime = releaseTime
+
+    # get length of envelope
+    def getLength(self):
+        return self.__getAbsoluteDelay__() + self.releaseTime
+
+    # get list of absolute attack times, attack time distance from start of envelope
+    def __getAbsoluteAttackTimes__(self):
+        # now convert relative attack times to absolute from the start time
+        absoluteAttackTimes = [ self.attackTimes[0] ]   # initialize first list element
+        for i in range(1, len(self.attackTimes)):            # process remaining times
+            absoluteAttackTimes.append(self.attackTimes[i] + absoluteAttackTimes[i-1])
+        return absoluteAttackTimes
+
+    def __getAbsoluteDelay__(self):
+        # same for delay
+        absoluteAttackTimes = self.__getAbsoluteAttackTimes__()
+        absoluteDelayTime =  absoluteAttackTimes[len(absoluteAttackTimes) - 1] + self.delayTime
+        return absoluteDelayTime
+
+
 
 # Holds notes currently sounding, in order to prevent premature NOTE-OFF for overlapping notes on the same channel 
 # For every frequencyOn() we add the tuple (pitch, channel), and for every frequencyOff() we rmove the tuple.  
@@ -1609,7 +1739,14 @@ class Play(jPlay):
    def setPitchBend(bend = 0, channel=0):
       """Set global pitchbend variable to be used when a note / frequency is played."""
 
-      CURRENT_PITCHBEND[channel] = bend
+      if (bend <= 8191) and (bend >= -8192):   # is pitchbend within appropriate range?
+
+         CURRENT_PITCHBEND[channel] = bend
+
+      else:     # frequency was outside expected range    
+
+         print "Play.setPitchBend(): Invalid pitchbend " + str(bend) + ", expected pitchbend in range -8192 to 8191."
+
       
    def getPitchBend(channel=0):
       """returns the current pitchbend for this channel."""
@@ -1631,24 +1768,27 @@ class Play(jPlay):
       # now, really set the pitchbend on the Java synthesizer (this is the only place this is done!)      
       channelHandle = Java_synthesizer.getChannels()[channel]   # get a handle to channel
 
-      # NOTE: The MIDI specification states that pitch is a 14-bit value, where zero is 
-      # maximum downward bend, 16383 is maximum upward bend, and 8192 is center - no pitch bend.
-      # Here we adjust for no pitch bend (center) to be 0, max downward bend to be -8192, and
-      # max upward bend to be 8191.  Also, we add the current pitchbend as set previously.
-      pitchbend = bend + PITCHBEND_NORMAL + CURRENT_PITCHBEND[channel]  # calculate pitchbend to set
-      if (pitchbend <= PITCHBEND_MAX) and (pitchbend >= PITCHBEND_MIN):  # is pitchbend within appropriate range?
+      # NOTE: Normal (or no) pitch bend is 0, max downward bend is -8192, and max upward bend is 8191.
+      # However, internally, the MIDI specification wants normal pitch bend to be 8192, max downward 
+      # bend to be 0, and max upward bend to be 16383).  
+      # Here we from translate external pitch bend specification (-8192 to 0 to 8191) to internal MIDI pitch bend
+      # specification (0 to 8192 to 16383).  
+      # Also, we add the current pitchbend, as set previously.
+      pitchbend = bend + PITCHBEND_NORMAL + CURRENT_PITCHBEND[channel]    # calculate pitchbend to set
+      if (pitchbend <= PITCHBEND_MAX) and (pitchbend >= PITCHBEND_MIN):   # is pitchbend within appropriate range?
 
-         channelHandle.setPitchBend( pitchbend )       # send the message
+         channelHandle.setPitchBend( pitchbend )       # send message
+
+         # and send message to start the note on this channel
+         if panning != -1:                              # if we have a specific panning,
+            channelHandle.controlChange(10, panning)       # then, use it (otherwise let default / global panning stand)
+
+         channelHandle.noteOn(pitch, velocity)          # and start the note on Java synthesizer
 
       else:     # frequency was outside expected range    
 
-         print "Play.noteOnPitchBend(): Invalid pitchbend " + str(pitchbend - PITCHBEND_NORMAL) + ", expected pitchbend in range -8192 to 8192."
-
-      # and send the message to start the note on this channel
-      if panning != -1:                              # if we have a specific panning,
-         channelHandle.controlChange(10, panning)       # then, use it (otherwise let default / global panning stand)
-
-      channelHandle.noteOn(pitch, velocity)          # and start the note on Java synthesizer
+         print "Play.noteOnPitchBend(): Invalid pitchbend " + str(pitchbend - PITCHBEND_NORMAL) + \
+               ", expected pitchbend in range " + str(PITCHBEND_MIN-PITCHBEND_NORMAL) + " to " + str(PITCHBEND_MAX-PITCHBEND_NORMAL) + "."
 
 
    def allNotesOff():
@@ -1742,7 +1882,7 @@ class Play(jPlay):
       return channelHandle.getController(10)                # obtain the current value for panning controller
 
 
-   def audio(material, listOfAudioSamples):
+   def audio(material, listOfAudioSamples, listOfEnvelopes = []):
       """Play jMusic material using a list of audio samples as voices"""
       
       # do necessary datatype wrapping (MidiSynth() expects a Score)
@@ -1806,8 +1946,10 @@ class Play(jPlay):
 
 
             # this function only supprts a regular, solo note (not part of a chord)
-               
-               Play.audioNote(pitch, start, duration, listOfAudioSamples[channel], velocity, panning)
+               if len(listOfEnvelopes) != 0:
+                  Play.audioNote(pitch, start, duration, listOfAudioSamples[channel], velocity, panning, listOfEnvelopes[channel])
+               else:
+                  Play.audioNote(pitch, start, duration, listOfAudioSamples[channel], velocity, panning)
 
          # now, all notes have been scheduled for future playing - scheduled notes can always be stopped using
          # JEM's stop button - this will stop all running timers (used by Play.note() to schedule playing of notes)
@@ -1816,26 +1958,70 @@ class Play(jPlay):
       else:   # error check    
          print "Play.audio(): Unrecognized type " + str(type(material)) + ", expected Note, Phrase, Part, or Score."
 
-   def audioNote(pitch, start, duration, audioSample, velocity = 127, panning = -1):
+   def audioNote(pitch, start, duration, audioSample, velocity = 127, panning = -1, envelope = Envelope()):
       """Play a note using an AudioSample for generating the sound."""
 
       if (type(pitch) == int) and (0 <= pitch <= 127):   # a MIDI pitch?
          # yes, so convert pitch from MIDI number (int) to Hertz (float)
          pitch = noteToFreq(pitch)
 
-      # create a timer for the note-on event
-      audioOn = Timer2(start, Play.audioOn, [pitch, audioSample, velocity, panning], False)
 
-      # create a timer for the note-off event
-      audioOff = Timer2(start+duration, Play.audioOff, [pitch, audioSample], False)
+      # apply envelope to note
+      if envelope.getLength() > duration:
+         print("Play.audioNote(): Envelope is too large for this note,\n midi: " + str(pitch) + "\nnote length: " + str(duration) + "\nenvelope length: " + str(envelope.getLength()))
+      else:
+         envelopeLength = envelope.getLength()
+         #now create the list of delays that will be passed to the setVolume method
+         # convert delays to seconds for the amplitude smoother
+         attackDelays = []
+         attackTimes = envelope.getAttackTimes()
+         for i in range(len(attackTimes)):
+            attackDelays.append(float(attackTimes[i]) / 1000.0)
+         # now we have a list of how long each attack lasts in seconds
 
-      # lower volume right at end of the audioOff event (this removes clicking)
-      envelopeTimer = Timer2(start+duration, audioSample.setVolume, [0], False)
+         delayDelay = float(envelope.getDelay() / 1000.0)
+         releaseDelay = float(envelope.getRelease() / 1000.0)
+         # and how long the delay and release lasts in seconds
 
-      audioOn.start()
-      audioOff.start()
-      envelopeTimer.start()
+         # adjust attackValues relative to note velocity
+         relativeAttackValues = []
+         for i in range( len(envelope.getAttackValues() ) ):
+            relativeValue = mapValue( envelope.getAttackValues()[i], 0.0, 1.0, 0, velocity )   # adjust
+            relativeAttackValues.append( relativeValue )                                       # and remember
 
+         # adjust sustainValue relative to note velocity
+         relativeSustainValue = mapValue( envelope.sustainValue, 0.0, 1.0, 0, velocity )
+
+         # get absolute release time
+         absoluteReleaseTime = duration - envelope.getRelease()
+
+         # create list of timers to perform volume changes
+         attackTimers = []
+
+         # first, create timers for envelope attack 
+         for i in range( len(relativeAttackValues) ):
+             timerOffset = envelope.__getAbsoluteAttackTimes__()[i]
+             volume = relativeAttackValues[i]
+             delay = attackDelays[i]
+             timer = Timer2(start+timerOffset, audioSample.setVolume, [volume, delay], False)
+             attackTimers.append( timer )
+ 
+         # now, create timers for envelope sustain and release
+         sustainTimer = Timer2(start + envelope.__getAbsoluteDelay__(), audioSample.setVolume, [relativeSustainValue, delayDelay], False)
+         releaseTimer = Timer2(start + absoluteReleaseTime, audioSample.setVolume, [0, releaseDelay], False)
+  
+         # finally, create timers for note-on and note-off events
+         audioOn  = Timer2(start, Play.audioOn, [pitch, audioSample, velocity, panning], False)
+         audioOff = Timer2(start+duration, Play.audioOff, [pitch, audioSample], False)
+         
+         # everything is ready, so start timers to schedule playng of note
+         audioOn.start()
+         for i in range(len(attackTimers)):
+           attackTimers[i].start()
+         sustainTimer.start()
+         releaseTimer.start()
+         audioOff.start()
+         
 
    def audioOn(pitch, audioSample, velocity = 127, panning = -1):
       """Start playing a specific pitch at a given volume using provided audio sample."""
@@ -1912,6 +2098,8 @@ try:
 except:  # otherwise (if we get an error), we are NOT inside JEM 
 
     pass    # so, do nothing.
+
+
 
 
 ######################################################################################
@@ -2238,16 +2426,19 @@ class AudioSample():
       """
       return self.panning
    
-   def setVolume(self, volume):
+   def setVolume(self, volume, delay = 0.0002):
       """
       Set sample's volume (volume ranges from 0 - 127).
       """
       if volume < 0 or volume > 127:
          print "Volume (" + str(volume) + ") should range from 0 to 127."
+      elif delay < 0.0:
+         print "Delay (" + str(delay) + ") should be at least 0.0"
       else:
          self.volume = volume                            # remember new volume
          amplitude = mapValue(self.volume,0,127,0.0,1.0) # map volume to amplitude
          self.amplitudeSmoother.input.set( amplitude )   # and set it
+         self.amplitudeSmoother.time.set(delay)          # set delay time
      
    def getVolume(self):
       """
@@ -2350,7 +2541,6 @@ try:
 except:  # otherwise (if we get an error), we are NOT inside JEM 
 
     pass    # so, do nothing.
-
 
 
    
@@ -2903,250 +3093,6 @@ except:  # otherwise (if we get an error), we are NOT inside JEM
 
     pass    # so, do nothing.
  
-
-
-
-
-##### Sound Synthesizer class ######################################
-
-class SoundSynth():
-   """Encapsulates a hybrid synthesizer which can be instantiated with a combination of 
-      MIDI/MidiSequence/AudioSample instruments.  For now, we limit this to 16 instruments,
-      to agree with the number of different channels that can be specified in music library Part
-      objects.  We provide the following operations: noteOn(), noteOff(), allNotesOff(), and
-      midi() - the latter as in Play.midi().  
-      Note pitches can be specified by float numbers (so, for MIDI instruments, we utilize pitch bend).  
-      Although we can play multiple MIDI notes per channel, if non-integer (i.e., 69.3) MIDI pitches are used, 
-      the associated pitch bend applies to all other notes sounding on this channel at the time - hence 
-      the suggested limitation of one note per channel.
-      If MIDI pitches are all integers (e.g., 69.0), several notes on the same channel can be
-      rendered (correctly).
-      
-      The provided instruments list may consist of integers (i.e., MIDI instruments), music library
-      objects (Note, Phrase, Part, or Score), and strings (assumed to be WAV or AIF files).
-   """
-   
-   def __init__(self, sounds, volume=127):
-   
-      self.sounds = sounds
-      self.masterVolume = volume              # holds current volume (0 - 127)
-      
-      self.instruments = []                   # holds the instruments associated with each sound 
-
-      # create all the instruments by creating Midi sequences, and audio samples
-      for sound in self.sounds:
-
-         # detrmine what type of sound we are dealing with, and instantiate appropriate classes (if needed)
-         if isinstance(sound, int) and (0 <= sound <= 127):  # a MIDI instrument constant (0-127)?
-         
-            self.instruments.append( sound )                    # store the MIDI constant verbatim
-         
-         elif isinstance(sound, Note) or isinstance(sound, Phrase) or isinstance(sound, jPhrase) or isinstance(sound, Part) or isinstance(sound, Score):
-         
-            self.instruments.append( MidiSequence(sound) )      # build and store a MidiSequence
-            
-         elif isinstance(sound, str):    # an audio sample?
-         
-            self.instruments.append( AudioSample(sound) )       # build and store and AudioSample
-            
-         else:
-            raise TypeError("SoundSynth() - Unrecognized sound type", type(sound), "- expected integer (0-127), filename (string), Note, Phrase, Part, or Score.")
-
-      # now, self.instruments contains the various sound instruments (MIDI instrument numbers (0-127), MIDI sequences, or audio samples)
-      
-      # **** here
-                  
-      self.freeMidiChannels = range(16)    # holds all MIDI channels (banks) available to play a note
-      self.busyMidiChannels = {}           # holds all MIDI channels (banks) playing a note (indexed by the note itself)
-
-      
-   def noteOn(self, pitch, instrument=0, volume=127):
-      """Start playing this pitch on the corresponding instrument (if pitch is float we use pitch bend)."""
-      
-      #if 
-      
-      if len( self.freeBanks ) > 0:   # are there any available banks to play this note?
-
-         # get next available AudioSample
-         audioSample = self.freeBanks.pop()    # remove one from the list of available ones
-         
-         # add it to the collection of busy banks - indexed by pitch being played
-         # (since there may be more than one concurrent note with the same pitch, we 
-         # store a list of audioSamples per pitch)
-         self.busyBanks[pitch] = self.busyBanks.get(pitch, []) + [audioSample]  # and append it 
-      
-         # NOTE:  We could have indexed self.busyBanks with (pitch, volume) to be able to
-         # find the exact audio sample playing this pitch at a given volume, in case of more 
-         # than one audio samples playing the same note - but the chances of this ever happening
-         # are so small, that, for simplicity, we ignore this possibility (for now).
-      
-         # start note
-         audioSample.setPitch( pitch )   # set the pitch for this audio sample, 
-         audioSample.setVolume( volume ) # also set its volume, and
-         audioSample.loop()              # start playing this note
-      
-      else:                             # all banks are busy, so let them know
-
-         print "AudioInstrument.noteOn(" + str(pitch) + "): too many notes sounding."
-
-            
-   def noteOff(self, pitch):
-      """Stop playing this pitch.  If pitch is not sounding, a warning is output."""
-      
-      try:     # see if this note is sounding
-      
-         audioSample = self.busyBanks[pitch].pop()  # get AudioSample playing this pitch (if any)
-         audioSample.stop()                         # stop the note
-         self.freeBanks.append( audioSample )       # put it back in the available banks
-      
-      except:  # this note was not sounding
-
-         print "AudioInstrument.noteOff(" + str(pitch) + "): this pitch is not sounding."
-
-   def allNotesOff(self):
-      """It turns off all notes on all banks."""
-      
-      # turn off all sounding banks and return them to the free list
-      for bankList in self.busyBanks.values():  # iterate through list of lists
-         for audioSample in bankList:              # iterate through this list
-            audioSample.stop()                        # stop this note
-            self.freeBanks.append( audioSample )      # put it back in the available banks
-
-     
-         
-
-##### AudioInstrument class ######################################
-
-class AudioInstrument():
-   """Encapsulates an instrument based on an audio sample, which may be used to play up to 16 
-      overlapping, continuous notes, via operations noteOn(), noteOff(), allNotesOff(), 
-      frequencyOn(), frequencyOff(), and allFrequenciesOff().  
-      
-      The instrument has a default MIDI pitch associated with it (if not specified, it is A4), 
-      so we can play different pitches with it (through pitch shifting).
-      
-      The maxBanks parameter determines how many parallel (overlapping) notes this instrument
-      can play.
-      
-      Supported data formats are WAV or AIF files (16, 24 and 32 bit PCM, and 32-bit float).
-   """
-   
-   def __init__(self, filename, pitch=A4, volume=127, maxBanks=16):
-   
-      self.filename = filename
-      self.defaultPitch = pitch  # the default pitch of the audio file (sample)
-      self.pitch = pitch         # holds playback pitch (may be different from default pitch)
-      self.volume = volume       # holds current volume (0 - 127)
-      
-      self.maxBanks = maxBanks   # number of concurrrent notes supported
-
-      # create all the banks by loading the audio samples
-      self.freeBanks = []    # holds all AudioSamples (banks) available to play a note
-      for i in range( self.maxBanks ): 
-         self.freeBanks.append( AudioSample(filename, pitch, volume) ) 
-      # now, all AudioSamples (banks) have been created
-
-      self.busyBanks = {}    # holds all AudioSamples (banks) playing a note (indexed by the note itself)
-
-      
-   def noteOn(self, pitch, volume=50):
-      """Start playing this pitch on the next available AudioInstrument bank."""
-      
-      if len( self.freeBanks ) > 0:   # are there any available banks to play this note?
-
-         # get next available AudioSample
-         audioSample = self.freeBanks.pop()    # remove one from the list of available ones
-         
-         # add it to the collection of busy banks - indexed by pitch being played
-         # (since there may be more than one concurrent note with the same pitch, we 
-         # store a list of audioSamples per pitch)
-         self.busyBanks[pitch] = self.busyBanks.get(pitch, []) + [audioSample]  # and append it 
-      
-         # NOTE:  We could have indexed self.busyBanks with (pitch, volume) to be able to
-         # find the exact audio sample playing this pitch at a given volume, in case of more 
-         # than one audio samples playing the same note - but the chances of this ever happening
-         # are so small, that, for simplicity, we ignore this possibility (for now).
-      
-         # start note
-         audioSample.setPitch( pitch )   # set the pitch for this audio sample, 
-         audioSample.setVolume( volume ) # also set its volume, and
-         audioSample.loop()              # start playing this note
-      
-      else:                             # all banks are busy, so let them know
-
-         print "AudioInstrument.noteOn(" + str(pitch) + "): too many notes sounding."
-
-            
-   def noteOff(self, pitch):
-      """Stop playing this pitch.  If pitch is not sounding, a warning is output."""
-      
-      try:     # see if this note is sounding
-      
-         audioSample = self.busyBanks[pitch].pop()  # get AudioSample playing this pitch (if any)
-         audioSample.stop()                         # stop the note
-         self.freeBanks.append( audioSample )       # put it back in the available banks
-      
-      except:  # this note was not sounding
-
-         print "AudioInstrument.noteOff(" + str(pitch) + "): this pitch is not sounding."
-
-   def allNotesOff(self):
-      """It turns off all notes on all banks."""
-      
-      # turn off all sounding banks and return them to the free list
-      for bankList in self.busyBanks.values():  # iterate through list of lists
-         for audioSample in bankList:              # iterate through this list
-            audioSample.stop()                        # stop this note
-            self.freeBanks.append( audioSample )      # put it back in the available banks
-
-   ################################
-   # Now, a bit more esoteric stuff
-
-   def frequencyOn(self, frequency, volume=50):
-      """Start playing this frequency on the next available AudioInstrument bank."""
-      
-      if len( self.freeBanks ) > 0:   # are there any available banks to play this note?
-
-         # get next available AudioSample
-         audioSample = self.freeBanks.pop()    # remove one from the list of available ones
-         
-         # add it to the collection of busy banks - indexed by frequency being played
-         # (since there may be more than one concurrent note with the same frequency, we 
-         # store a list of audioSamples per pitch)
-         self.busyBanks[frequency] = self.busyBanks.get(frequency, []) + [audioSample]  # and append it 
-      
-         # NOTE:  We could have indexed self.busyBanks with (frequency, volume) to be able to
-         # find the exact audio sample playing this frequency at a given volume, in case of more 
-         # than one audio samples playing the same note - but the chances of this ever happening
-         # are so small, that, for simplicity, we ignore this possibility (for now).
-      
-         # start note
-         audioSample.setFrequency( frequency )   # set the frequency for this audio sample, 
-         audioSample.setVolume( volume )         # also set its volume, and
-         audioSample.loop()                      # start playing this note
-      
-      else:                             # all banks are busy, so let them know
-
-         print "AudioInstrument.frequencyOn(" + str(frequency) + "): too many notes sounding."
-      
-   def frequencyOff(self, frequency):
-      """Stop playing this frequency.  If frequency is not sounding, a warning is output."""
-      
-      try:     # see if this note is sounding
-      
-         audioSample = self.busyBanks[frequency].pop()  # get AudioSample playing this frequency (if any)
-         audioSample.stop()                             # stop the note
-         self.freeBanks.append( audioSample )          # put it back in the available banks
-      
-      except:  # this note was not sounding
-
-         print "AudioInstrument.frequencyOff(" + str(frequency) + "): this pitch is not sounding."
-
-   def allFrequenciesOff(self):
-      """It turns off all notes on all channels."""
-
-      self.allNotesOff()   
-  
 
    
 ######################################################################################

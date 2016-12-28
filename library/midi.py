@@ -536,7 +536,7 @@ class MidiOut():
 
       self.instrument = {}        # holds current instrument for each channel
       for channel in range(16):   # initialize all to PIANO (default)
-         self.insturment = 0  
+         self.instrument[channel] = 0  
 
       self.volume = {}            # holds current global volume
       for channel in range(16):   # initialize all to max volume
@@ -657,7 +657,7 @@ class MidiOut():
                
                # yes, so schedule it to play via a Play.note event
                self.note(pitch, start, duration, velocity, channel, panning)
-               #print "Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
+               #print "MidiOut.note(" + str(pitch) + ", " + str(start) + ", " + str(duration) + ", " + str(velocity) + ", " + str(channel) + ", " + str(panning) + ")"
 
             else:   # note has a normal duration and it is part of a chord
 
@@ -668,7 +668,7 @@ class MidiOut():
                for start, ignoreThisDuration, pitch, velocity, channel, panning in chordNotes:
                   # schedule this note using chord's duration (provided by the last note in the chord)
                   self.note(pitch, start, duration, velocity, channel, panning)
-                  #print "Chord: Play.note(" + str(pitch) + ", " + str(int(start * FACTOR)) + ", " + str(int(duration * FACTOR)) + ", " + str(velocity) + ", " + str(channel) + ")"
+                  #print "Chord: MidiOut.note(" + str(pitch) + ", " + str(start) + ", " + str(duration) + ", " + str(velocity) + ", " + str(channel) + ", " + str(panning) + ")"
                # now, all chord notes have been scheduled
 
                # so, clear chord notes to continue handling new notes (if any)
