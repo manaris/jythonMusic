@@ -1,5 +1,5 @@
 ################################################################################################################
-# midi.py       Version 2.1     12-Nov-2016     Marge Marshall, David Johnson, Bill Manaris, Kenneth Hanson
+# midi.py       Version 2.2     31-Dec-2016     Marge Marshall, David Johnson, Bill Manaris, Kenneth Hanson
 
 ###########################################################################
 #
@@ -27,6 +27,9 @@
 #
 #
 # REVISIONS:
+#
+#   2.2     31-Dec-2016 (bm) Updated MidiOut so that, when JEM's stop button is pressed, to first stop all actives notes
+#						from sounding, and then close down.
 #
 #   2.1     12-Nov-2016 (bm) Updated MidiOut play() to respect global instrument settings, also updated set/getInstrument(),
 #                       set/getVolume(), set/getPanning().  MidiOut() now also accepts a preferred output device as a string.
@@ -1035,7 +1038,8 @@ def _stopActiveMidiObjects_():
 
    # stop MidiOut objects
    for midiOut in _ActiveMidiOutObjects_:
-      midiOut.close()
+   	  midiOut.stop()     # first, stop all notes playing
+   	  midiOut.close()
 
    # ***
    # NOTE:  Here we take care of Mac OSX pesky Java MIDI implementation problem 
