@@ -1,0 +1,3 @@
+# ignore junk files
+/cachedir
+.DS_Store
