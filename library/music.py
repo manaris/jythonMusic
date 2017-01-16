@@ -1,5 +1,5 @@
 ################################################################################################################
-# music.py      Version 4.9         27-Dec-2016       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
+# music.py      Version 4.10         16-Jan-2017       Bill Manaris, Marge Marshall, Chris Benson, and Kenneth Hanson
 
 ###########################################################################
 #
@@ -28,8 +28,10 @@
 #
 # REVISIONS:
 #
-# 4.9   27-Dec-2016 (bm)  Fixed jMusic Note bug, where, if int pitch was given, both frequency and pitch attributes were populated, but 
-#					if float pitch was given (i.e., frequency in Hertz), only the frequency attribute was populated - no pitch).
+# 4.10  16-Jan-2017 (bm)  Fixed Note.getPitch() to return REST for rest notes, as it should.
+#
+# 4.9   27-Dec-2016 (bm)  Fixed jMusic Note bug, where, if int pitch is given, both frequency and pitch attributes are populated, but 
+#					if float pitch is given (i.e., frequency in Hertz), only the frequency attribute is populated - no pitch).
 #					Consequently, in the second case, calling getPitch() crashes the system.  We fix it by also calling setFrequency()
 #					or setPitch() in our wrapper of the Note constructor.  Also added getPitch() and getPitchBend() to fully convert
 #					a frequency to MIDI pitch information.
@@ -1164,9 +1166,13 @@ class Note(jNote):
    
       # get frequency
       frequency = self.getFrequency()
-      
-      # and calculate corresponding pitch and pith bend
-      pitch, bend = freqToNote(frequency)
+
+      # convert to corresponding pitch
+      if frequency == float(REST):    # is it a rest?
+         pitch = REST                    # yes, so update accordingly
+      else:   # it's a regular note, so...
+         # calculate corresponding pitch and pith bend
+         pitch, bend = freqToNote(frequency)
 
       # return only pitch
       return pitch
