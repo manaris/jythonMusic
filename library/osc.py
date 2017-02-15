@@ -1,5 +1,5 @@
 ################################################################################################################
-# osc.py       Version 1.4     07-Dec-2014     David Johnson and Bill Manaris
+# osc.py       Version 1.5     11-Feb-2016     David Johnson and Bill Manaris
 
 ###########################################################################
 #
@@ -27,6 +27,8 @@
 #
 #
 # REVISIONS:
+#
+#   1.5     11-Feb-2016 (dj) Update in how we get host IP address in OscIn object to fix Mac OSX problem.
 #
 #   1.4     07-Dec-2014 (bm) Changed OscIn object functionality to allow registering of only *one*
 #                       callback function per address (to mirror the corresponding MidiIn's object's
@@ -130,7 +132,7 @@ class OscIn():
       self.oscPortIn.startListening()        # and start it
 
       # also, get our host IP address (to output below, for the user's convenience)
-      self.IPaddress = socket.gethostbyname(socket.getfqdn())  
+      self.IPaddress = socket.gethostbyname(socket.gethostname())
       print "\nOSC Server started:"    
       print "Accepting OSC input on IP address", self.IPaddress, "at port", self.port
       print "(use this info to configure OSC clients)"
